@@ -1,5 +1,5 @@
 module Lib
-    ( matchTrue
+    ( 
     ) where
 
 import Text.ParserCombinators.Parsec hiding ((<|>), many)
@@ -9,57 +9,74 @@ import Control.Monad
 data JSONValue = B Bool 
                | S String
                | A [JSONValue]
+               | O [(String, JSONValue)]
                deriving (Eq, Show)
 
+ws :: Parser String
+ws = many (oneOf " \t\n")
 
-matchTrue :: Parser String
-matchTrue = string "true"
+lexeme p = p <* ws
+
 
 alwaysTrue :: Parser Bool
 alwaysTrue = pure True
 
 boolTrue :: Parser Bool
-boolTrue = matchTrue *> alwaysTrue
+boolTrue = (lexeme $ string "true") *> alwaysTrue
 
 boolFalse :: Parser Bool
-boolFalse = (string "false") *> (pure False)
+boolFalse = (lexeme $ string "false") *> (pure False)
 
 bool :: Parser Bool
 bool = boolTrue <|> boolFalse
 
 jsonBool :: Parser JSONValue
-jsonBool = B <$> bool
+jsonBool = (lexeme (B <$> bool)) <* eof
 -- we are mapping the data constructor over our value
 
 stringLiteral :: Parser String
 stringLiteral = 
-  char '"' *> (many (noneOf ['"'])) <* char '"'
+  (lexeme $ char '"') *> (many (noneOf ['"'])) <* (lexeme $ char '"')
 
 jsonString :: Parser JSONValue
-jsonString = S <$> stringLiteral
+jsonString = lexeme $ S <$> stringLiteral
 
 -- the sequence operators <* and *> allow us to run operations and discard their
 -- results. So here, aslong as we find opening and closing quote marks we just
 -- return the other characters between them
 
 array :: Parser [JSONValue]
-array = (char '[') 
+array = (lexeme $ char '[') 
         *>
-        ( jsonValue `sepBy` (char ',') ) 
+        ( jsonValue `sepBy` (lexeme $ char ',') ) 
         <*
-        (char ']')
+        (lexeme $ char ']')
 jsonArray :: Parser JSONValue
-jsonArray = A <$> array
+jsonArray = lexeme (A <$> array)
 
 jsonValue :: Parser JSONValue
-jsonValue = jsonBool <|> jsonString <|> jsonArray
+jsonValue = lexeme $ jsonBool <|> jsonString <|> jsonArray <|> jsonObject
+
+objectEntry :: Parser (String, JSONValue)
+objectEntry = do
+  key <- stringLiteral
+  lexeme $ char ':'
+  value <- jsonValue
+  return (key, value)
+
+jsonObject = O <$> ((lexeme $ char '{')
+                   *>
+                   ( objectEntry `sepBy` (lexeme $ char ',') )
+                   <* (lexeme $ char '}'))
+
+
+object :: String 
+object = "{\"somekey\":\"somevalue\",\"wooP\":true}"
 
 main :: IO ()
 main = do
-print $
-  parse jsonValue "test parser" "[\"heleo\",true]"
-print $ parse jsonValue "test parser" "true"
-print $ parse jsonValue "test parser" "\"heleo\""
-print $
-  parse jsonValue "test parser" "[\"heleo\",true,[true,false]]"
-
+  x <- parseFromFile jsonValue "src/data.txt"
+  case x of
+    Right (O x') -> do
+      print $ lookup "name" x'
+      print $ lookup "age" x'
